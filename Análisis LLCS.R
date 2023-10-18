@@ -722,22 +722,126 @@ eps_sens_imp <- eps_sens_imp %>%
 lapply(eps_main_imp[,c(-1,-2)], table)
 lapply(eps_main_sens[,c(-1,-2)], table)
 
+summary(eps_main_imp$dad)
+sd(eps_main_imp$dad)
+summary(eps_main_imp$edad)
+sd(eps_main_imp$edad)
 
+#BIVARIATE
+eps_main_imp %>% 
+  table(pos_retiro)
+table(eps_main_imp$vivienda ,eps_main_imp$pos_retiro)
+
+p_tab <- function(data, var1, var2 = "pos_retiro"){
+  # Ensure the column names are interpreted correctly
+  col1 <- data[[var1]]
+  col2 <- data[[var2]]
+  
+  # Create a contingency table
+  tab <- table(col1, col2)
+  
+  # Calculate percentages by row
+  tab_percent <- prop.table(tab, margin = 1) * 100
+  
+  # Combine counts and percentages
+  combined_tab <- matrix(0, nrow = nrow(tab), ncol = ncol(tab) * 2)
+  
+  for(i in 1:nrow(tab)){
+    for(j in 1:ncol(tab)){
+      combined_tab[i, (j * 2) - 1] <- paste0(tab[i,j], " (", sprintf("%.1f", tab_percent[i,j]), "%)")
+    }
+  }
+  
+  # Set appropriate column and row names
+  colnames(combined_tab) <- rep(colnames(tab), each = 2)
+  rownames(combined_tab) <- rownames(tab)
+  
+  # Return the combined table
+  return(combined_tab)
+}
+p_tab_modified <- function(col1, data, var2 = "pos_retiro"){
+  # Ensure the column names are interpreted correctly
+  col2 <- data[[var2]]
+  
+  # Create a contingency table
+  tab <- table(col1, col2)
+  
+  # Calculate percentages by row
+  tab_percent <- prop.table(tab, margin = 1) * 100
+  
+  # Combine counts and percentages
+  combined_tab <- matrix(0, nrow = nrow(tab), ncol = ncol(tab) * 2)
+  
+  for(i in 1:nrow(tab)){
+    for(j in 1:ncol(tab)){
+      combined_tab[i, (j * 2) - 1] <- paste0(tab[i,j], " (", sprintf("%.1f", tab_percent[i,j]), "%)")
+    }
+  }
+  
+  # Set appropriate column and row names
+  colnames(combined_tab) <- rep(colnames(tab), each = 2)
+  rownames(combined_tab) <- rownames(tab)
+  
+  # Return the combined table
+  return(combined_tab)
+}
+result <- lapply(eps_main_imp[, -c(1,2)], p_tab_modified, data = eps_main_imp)
+p_tab(eps_main_imp, "vivienda")
+
+eps_main_imp %>% 
+  group_by(pos_retiro) %>% 
+  summarise(media = mean(edad),
+            sd = sd(edad))
 # MODELOS
 
 mixlogit <- glmer(pos_retiro ~ vivienda + apv+ contrato + sit_laboral + oficio + 
-                    salud + depresion +dad+ecivil*female + edad + (1|folio_n20),
+                    salud + depresion +dad+ecivil*female + nedu + edad + (1|folio_n20),
                        data = eps_main_imp,
                        family = binomial(link = "logit"))
 
 mixlogit_edad <- glmer(pos_retiro ~ vivienda + apv + contrato + sit_laboral + oficio 
-                       + salud + depresion +dad+ecivil + edad*female + (1|folio_n20),
+                       + salud + depresion +dad+ecivil +nedu+ edad*female + (1|folio_n20),
                               data = eps_main_imp,
                               family = binomial(link = "logit"))
 
-summary(mixlogit)
+generateORtable <- function(model) {
+  
+  # Ensure the model is of class glmerMod
+  if(!inherits(model, "glmerMod")) {
+    stop("The provided model is not a glmer object.")
+  }
+  
+  # Get model summary
+  summary_model <- summary(model)
+  
+  # Extract coefficients, SE, and p-values
+  coefficients <- summary_model$coefficients[, 1]
+  SE <- summary_model$coefficients[, 2]
+  p_values <- summary_model$coefficients[, 4]
+  
+  # Calculate odds ratios
+  odds_ratios <- exp(coefficients)
+  
+  # Calculate 95% confidence intervals
+  lower_ci <- exp(coefficients - 1.96 * SE)
+  upper_ci <- exp(coefficients + 1.96 * SE)
+  
+  # Determine statistical significance and add asterisks
+  significance <- ifelse(p_values < 0.05, "*", "")
+  
+  # Combine results into a data frame
+  results <- data.frame(OddsRatio = paste0(round(odds_ratios, 2), significance),
+                        SE = round(SE, 2),
+                        LowerCI = round(lower_ci,2),
+                        UpperCI = round(upper_ci, 2))
+  
+  return(results)
+}
 
-summary(mixlogit_edad)
+
+# Use the function
+generateORtable(mixlogit)
+
 
 # Calcula los efectos marginales
 efectos_marginales <- ggpredict(mixlogit, terms = "edad [all]")
@@ -765,14 +869,15 @@ ggplot(efectos_marginales2, aes(x = x, y = predicted)) +
 
 ## SENSITIVITY ANALYSIS
 mixlogit_sens <- glmer(pos_retiro ~ vivienda + apv+ contrato + sit_laboral + oficio + 
-                         salud + depresion +dad+ecivil*female + edad + (1|folio_n20),
+                         salud + depresion +dad+ecivil*female + nedu+ edad + (1|folio_n20),
                        data = eps_sens_imp,
                        family = binomial(link = "logit"))
 mixlogit_edad_sens <- glmer(pos_retiro ~ vivienda + apv + contrato + sit_laboral + oficio 
-                            + salud + depresion +dad+ecivil + edad*female + (1|folio_n20),
+                            + salud + depresion +dad+ecivil +nedu+ edad*female + (1|folio_n20),
                             data = eps_sens_imp,
                             family = binomial(link = "logit"))
 
+generateORtable(mixlogit_sens)
 # Calcula los efectos marginales
 efectos_marginales_sens <- ggpredict(mixlogit_sens, terms = "edad [all]")
 
@@ -796,3 +901,281 @@ ggplot(efectos_marginales2_sens, aes(x = x, y = predicted)) +
        y = "Probability of expecting to work after retirement age") +
   scale_color_grey(start = 0, end = .7) + 
   scale_fill_grey(start = 0, end = .7)   
+
+
+# SENSIBILIDAD
+install.packages("glmmTMB", repos="https://cloud.r-project.org/")
+
+install.packages(c("sandwich", "lmtest"))
+library(sandwich)
+library(lmtest)
+library(glmmTMB)
+sensi <- eps_main_imp %>% 
+  mutate(pos_retiro = ifelse(pos_retiro == "Espera trabajar",1,0))
+model_poisson <- glm(pos_retiro ~ vivienda + apv + contrato + sit_laboral + oficio 
+                     + salud + depresion + dad + ecivil*female +nedu+ edad , 
+                     data = sensi, 
+                     family = poisson(link = "log"))
+table(sensi$pos_retiro)
+
+robust_se <- sqrt(diag(vcovHC(model_poisson, type = "HC0")))
+
+coeftest(model_poisson, df = Inf, vcov = vcovHC(model_poisson, type = "HC0"))
+exp(model_poisson$coefficients)
+
+# Extract coefficients and robust standard errors
+coefficients <- model_poisson$coefficients
+
+# Calculate odds ratios
+rr <- exp(coefficients)
+
+# Calculate 95% confidence intervals
+z_value <- qnorm(1 - 0.05 / 2) # 1.96 for 95% CI
+lower_ci <- exp(coefficients - z_value * robust_se)
+upper_ci <- exp(coefficients + z_value * robust_se)
+
+# Get p-values from coeftest
+ct_results <- coeftest(model_poisson, df = Inf, vcov = vcovHC(model_poisson, type = "HC0"))
+p_values <- ct_results[,4]  # Assuming p-values are in the fourth column of the result
+
+# Determine statistical significance and add asterisks
+significance <- ifelse(p_values < 0.05, "*", "")
+
+# Combine results into a data frame
+or_table_poisson <- data.frame(
+  RR = paste0(round(rr, 3), significance),
+  SE = round(robust_se, 3),
+  LowerCI = round(lower_ci, 3),
+  UpperCI = round(upper_ci, 3)
+)
+
+# Print the table
+print(or_table_poisson)
+
+
+#####################
+# MULTINOMIAL LOGIT #
+#####################
+eps02 <- read_dta("C:/Users/Jose/Desktop/LLCS-D-22-00037 (1)/2002/2002/eps02_main.dta")
+eps04 <- read_dta("C:/Users/Jose/Desktop/LLCS-D-22-00037 (1)/2004/2004/eps04_main.dta")
+eps06 <- read_dta("C:/Users/Jose/Desktop/LLCS-D-22-00037 (1)/2006/2006/eps06_main.dta")
+eps09 <- read_dta("C:/Users/Jose/Desktop/LLCS-D-22-00037 (1)/2009/2009/eps09_main.dta")
+eps15 <- read_dta("C:/Users/Jose/Desktop/LLCS-D-22-00037 (1)/2015/2015/eps15_main.dta")
+eps20 <- read_dta("C:/Users/Jose/Desktop/LLCS-D-22-00037 (1)/2020/2020/eps20_main.dta")
+
+eps_main <- bind_rows("2002" = eps02, "2004" = eps04, "2006" = eps06, 
+                      "2009" = eps09, "2015" = eps15, "2020" = eps20, .id = "año") %>% 
+  arrange(folio_n20, año) %>% 
+  select(-ses_child, -household,-edad_retiro) %>% 
+  group_by(folio_n20) %>%
+  fill(apv, .direction = "down") %>%
+  fill(depresion, .direction = "down") %>%
+  fill(dad, .direction = "down") %>% 
+  ungroup() %>% 
+  filter(pos_retiro != 3) %>% 
+  mutate(salud = factor(salud, levels = c(1,0), labels = c("Buena", "Mala o regular")),
+         nedu = factor(nedu, levels = c(0:4), labels = c("Ninguna","Básica","Media","Universitaria","Posgrado")),
+         ecivil = factor(ecivil, levels  = c(1,0), labels = c("Casado", "No casado")),
+         vivienda = factor(vivienda, levels = c(1,0), labels = c("Propia","No propia")),
+         apv = factor(apv, levels = c(1,0), labels = c("Si","No")),
+         sit_laboral = factor(sit_laboral, levels = c(1,0), labels = c("Trabajando", "No trabajando")),
+         pos_retiro = factor(pos_retiro, levels = c(1,0), labels = c("Espera trabajar","No espera trabajar")),
+         oficio = factor(oficio, levels = c(1:4), labels = c("Empleador","Empleado","Independiente","Otro")),
+         contrato = factor(contrato, levels = c(1,0), labels = c("Si", "No")),
+         female = factor(female, levels = c(1,0), labels = c("Female","Male")),
+         depresion = factor(depresion, levels = c(1,0), labels = c("Si", "No")),
+         dad = factor(dad, levels = c(1,0), labels = c("Dificultad","Sin dificultad")))
+
+eps_multi <- eps_main %>% 
+  mutate(expect_trab = case_when(expect_trab == 1~"quit",
+                                 expect_trab == 2 ~"not quit",
+                                 between(expect_trab, 3,4)~ "reduce hours/ind",
+                                 TRUE ~ NA)) %>% 
+  filter(!is.na(expect_trab))
+  
+
+eps_multi_imp <- missRanger(
+  eps_multi, 
+  formula = . ~ .  - folio_n,
+  num.trees = 200, 
+  returnOOB=T,
+  maxiter=20,
+  verbose = 2, 
+  seed = 2125)
+
+write_dta(eps_multi_imp, "C:/Users/Jose/Desktop/LLCS-D-22-00037 (1)/eps_multi_imp.dta")
+
+
+# REFRESH SAMPLES
+
+anti_04 <- eps04 %>% 
+  anti_join(eps02, by = "folio_n20") %>% 
+  select(-ses_child, -household,-edad_retiro) %>% 
+  group_by(folio_n20) %>%
+  fill(apv, .direction = "down") %>%
+  fill(depresion, .direction = "down") %>%
+  fill(dad, .direction = "down") %>% 
+  ungroup() %>% 
+  filter(pos_retiro != 3) %>% 
+  mutate(salud = factor(salud, levels = c(1,0), labels = c("Buena", "Mala o regular")),
+         nedu = factor(nedu, levels = c(0:4), labels = c("Ninguna","Básica","Media","Universitaria","Posgrado")),
+         ecivil = factor(ecivil, levels  = c(1,0), labels = c("Casado", "No casado")),
+         vivienda = factor(vivienda, levels = c(1,0), labels = c("Propia","No propia")),
+         apv = factor(apv, levels = c(1,0), labels = c("Si","No")),
+         sit_laboral = factor(sit_laboral, levels = c(1,0), labels = c("Trabajando", "No trabajando")),
+         pos_retiro = factor(pos_retiro, levels = c(1,0), labels = c("Espera trabajar","No espera trabajar")),
+         oficio = factor(oficio, levels = c(1:4), labels = c("Empleador","Empleado","Independiente","Otro")),
+         contrato = factor(contrato, levels = c(1,0), labels = c("Si", "No")),
+         female = factor(female, levels = c(1,0), labels = c("Female","Male")),
+         depresion = factor(depresion, levels = c(1,0), labels = c("Si", "No")),
+         dad = factor(dad, levels = c(1,0), labels = c("Dificultad","Sin dificultad")))
+
+eps0204 <- bind_rows("2002" = eps02, "2004" = eps04, .id = "año") %>% 
+  arrange(folio_n20, año) %>% 
+  select(-ses_child, -household,-edad_retiro) 
+
+
+anti_06 <- eps06 %>% 
+  anti_join(eps0204, by = "folio_n20") %>% 
+  group_by(folio_n20) %>%
+  fill(apv, .direction = "down") %>%
+  fill(depresion, .direction = "down") %>%
+  fill(dad, .direction = "down") %>% 
+  ungroup() %>% 
+  filter(pos_retiro != 3) %>% 
+  mutate(salud = factor(salud, levels = c(1,0), labels = c("Buena", "Mala o regular")),
+         nedu = factor(nedu, levels = c(0:4), labels = c("Ninguna","Básica","Media","Universitaria","Posgrado")),
+         ecivil = factor(ecivil, levels  = c(1,0), labels = c("Casado", "No casado")),
+         vivienda = factor(vivienda, levels = c(1,0), labels = c("Propia","No propia")),
+         apv = factor(apv, levels = c(1,0), labels = c("Si","No")),
+         sit_laboral = factor(sit_laboral, levels = c(1,0), labels = c("Trabajando", "No trabajando")),
+         pos_retiro = factor(pos_retiro, levels = c(1,0), labels = c("Espera trabajar","No espera trabajar")),
+         oficio = factor(oficio, levels = c(1:4), labels = c("Empleador","Empleado","Independiente","Otro")),
+         contrato = factor(contrato, levels = c(1,0), labels = c("Si", "No")),
+         female = factor(female, levels = c(1,0), labels = c("Female","Male")),
+         depresion = factor(depresion, levels = c(1,0), labels = c("Si", "No")),
+         dad = factor(dad, levels = c(1,0), labels = c("Dificultad","Sin dificultad")))
+
+eps0204 <- bind_rows("2002" = eps02, "2004" = eps04, "2006" = eps06,.id = "año") %>% 
+  arrange(folio_n20, año) %>% 
+  select(-ses_child, -household,-edad_retiro)  
+  
+
+anti_09 <- eps09 %>% 
+  anti_join(eps0204, by = "folio_n20") %>% 
+  group_by(folio_n20) %>%
+  fill(apv, .direction = "down") %>%
+  fill(depresion, .direction = "down") %>%
+  fill(dad, .direction = "down") %>% 
+  ungroup() %>% 
+  filter(pos_retiro != 3) %>% 
+  mutate(salud = factor(salud, levels = c(1,0), labels = c("Buena", "Mala o regular")),
+         nedu = factor(nedu, levels = c(0:4), labels = c("Ninguna","Básica","Media","Universitaria","Posgrado")),
+         ecivil = factor(ecivil, levels  = c(1,0), labels = c("Casado", "No casado")),
+         vivienda = factor(vivienda, levels = c(1,0), labels = c("Propia","No propia")),
+         apv = factor(apv, levels = c(1,0), labels = c("Si","No")),
+         sit_laboral = factor(sit_laboral, levels = c(1,0), labels = c("Trabajando", "No trabajando")),
+         pos_retiro = factor(pos_retiro, levels = c(1,0), labels = c("Espera trabajar","No espera trabajar")),
+         oficio = factor(oficio, levels = c(1:4), labels = c("Empleador","Empleado","Independiente","Otro")),
+         contrato = factor(contrato, levels = c(1,0), labels = c("Si", "No")),
+         female = factor(female, levels = c(1,0), labels = c("Female","Male")),
+         depresion = factor(depresion, levels = c(1,0), labels = c("Si", "No")),
+         dad = factor(dad, levels = c(1,0), labels = c("Dificultad","Sin dificultad")))
+
+eps0204 <- bind_rows("2002" = eps02, "2004" = eps04, "2006" = eps06, "2009" = eps09, .id = "año") %>% 
+  arrange(folio_n20, año) %>% 
+  select(-ses_child, -household,-edad_retiro) 
+
+
+anti_15 <- eps15 %>% 
+  anti_join(eps0204, by = "folio_n20") %>% 
+  group_by(folio_n20) %>%
+  select(-ses_child, -household,-edad_retiro) %>% 
+  fill(apv, .direction = "down") %>%
+  fill(depresion, .direction = "down") %>%
+  fill(dad, .direction = "down") %>% 
+  ungroup() %>% 
+  filter(pos_retiro != 3) %>% 
+  mutate(salud = factor(salud, levels = c(1,0), labels = c("Buena", "Mala o regular")),
+         nedu = factor(nedu, levels = c(0:4), labels = c("Ninguna","Básica","Media","Universitaria","Posgrado")),
+         ecivil = factor(ecivil, levels  = c(1,0), labels = c("Casado", "No casado")),
+         vivienda = factor(vivienda, levels = c(1,0), labels = c("Propia","No propia")),
+         apv = factor(apv, levels = c(1,0), labels = c("Si","No")),
+         sit_laboral = factor(sit_laboral, levels = c(1,0), labels = c("Trabajando", "No trabajando")),
+         pos_retiro = factor(pos_retiro, levels = c(1,0), labels = c("Espera trabajar","No espera trabajar")),
+         oficio = factor(oficio, levels = c(1:4), labels = c("Empleador","Empleado","Independiente","Otro")),
+         contrato = factor(contrato, levels = c(1,0), labels = c("Si", "No")),
+         female = factor(female, levels = c(1,0), labels = c("Female","Male")),
+         depresion = factor(depresion, levels = c(1,0), labels = c("Si", "No")),
+         dad = factor(dad, levels = c(1,0), labels = c("Dificultad","Sin dificultad")))
+
+eps0204 <- bind_rows("2002" = eps02, "2004" = eps04, "2006" = eps06, "2009" = eps09,
+                     "2015" = eps15, .id = "año") %>% 
+  arrange(folio_n20, año) %>% 
+  select(-ses_child, -household,-edad_retiro) 
+  
+anti_20 <- eps20 %>% 
+  anti_join(eps0204, by = join_by("folio_n20")) %>% 
+  group_by(folio_n20) %>%
+  fill(apv, .direction = "down") %>%
+  fill(depresion, .direction = "down") %>%
+  ungroup() %>% 
+  filter(pos_retiro != 3) %>% 
+  mutate(salud = factor(salud, levels = c(1,0), labels = c("Buena", "Mala o regular")),
+         nedu = factor(nedu, levels = c(0:4), labels = c("Ninguna","Básica","Media","Universitaria","Posgrado")),
+         ecivil = factor(ecivil, levels  = c(1,0), labels = c("Casado", "No casado")),
+         vivienda = factor(vivienda, levels = c(1,0), labels = c("Propia","No propia")),
+         apv = factor(apv, levels = c(1,0), labels = c("Si","No")),
+         sit_laboral = factor(sit_laboral, levels = c(1,0), labels = c("Trabajando", "No trabajando")),
+         pos_retiro = factor(pos_retiro, levels = c(1,0), labels = c("Espera trabajar","No espera trabajar")),
+         oficio = factor(oficio, levels = c(1:4), labels = c("Empleador","Empleado","Independiente","Otro")),
+         contrato = factor(contrato, levels = c(1,0), labels = c("Si", "No")),
+         female = factor(female, levels = c(1,0), labels = c("Female","Male")),
+         depresion = factor(depresion, levels = c(1,0), labels = c("Si", "No")))
+
+
+lapply(anti_04[,c(-9,-8)], function(x) {
+  tbl <- table(x)
+  percent <- round(prop.table(tbl) * 100, 2)
+  return(data.frame(Frequency = tbl, Percentage = paste0(percent, "%")))
+})
+anti_04 %>% 
+  summarise(mean(edad),
+            sd(edad))
+
+lapply(anti_06[,c(-1,-10)], function(x) {
+  tbl <- table(x)
+  percent <- round(prop.table(tbl) * 100, 2)
+  return(data.frame(Frequency = tbl, Percentage = paste0(percent, "%")))
+})
+anti_06 %>% 
+  summarise(mean(edad),
+            sd(edad))
+
+lapply(anti_09[,c(-1,-9)], function(x) {
+  tbl <- table(x)
+  percent <- round(prop.table(tbl) * 100, 2)
+  return(data.frame(Frequency = tbl, Percentage = paste0(percent, "%")))
+})
+anti_09 %>% 
+  summarise(mean(edad),
+            sd(edad))
+lapply(anti_15[,c(-4,-1)], function(x) {
+  tbl <- table(x)
+  percent <- round(prop.table(tbl) * 100, 2)
+  return(data.frame(Frequency = tbl, Percentage = paste0(percent, "%")))
+})
+anti_15 %>% 
+  summarise(mean(edad),
+            sd(edad))
+lapply(anti_20[,c(-5,-2,-1)], function(x) {
+  tbl <- table(x)
+  percent <- round(prop.table(tbl) * 100, 2)
+  return(data.frame(Frequency = tbl, Percentage = paste0(percent, "%")))
+})
+anti_20 %>% 
+  summarise(mean(edad),
+            sd(edad))
+
+
+
